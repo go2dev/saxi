@@ -39,6 +39,13 @@ function ts(): string {
   return new Date().toTimeString().slice(0, 8);
 }
 
+/**
+ * V8 GC kinds (perf_hooks NODE_PERFORMANCE_GC_* constants). Note "incremental"
+ * entries report marking work accumulated across a GC cycle, not one atomic
+ * pause — only "minor"/"major" durations are actual stop-the-world time.
+ */
+const GC_KIND: Record<number, string> = { 1: "minor", 2: "major", 4: "incremental", 8: "weakcb" };
+
 export class PlotTelemetry {
   /** Sample QM (motor/FIFO status) every this many blocks; 0 = off. */
   public qmInterval: number;
@@ -102,7 +109,9 @@ export class PlotTelemetry {
         const observer = new PerformanceObserver((list) => {
           for (const entry of list.getEntries()) {
             if (entry.duration > 20) {
-              console.log(`[saxi-telemetry] ${ts()} GC pause: ${entry.duration.toFixed(0)}ms`);
+              const kindCode = (entry as { detail?: { kind?: number } }).detail?.kind ?? 0;
+              const kind = GC_KIND[kindCode] ?? `kind=${kindCode}`;
+              console.log(`[saxi-telemetry] ${ts()} GC ${kind}: ${entry.duration.toFixed(0)}ms`);
             }
           }
         });
