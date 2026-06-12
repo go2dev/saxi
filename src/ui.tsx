@@ -665,7 +665,7 @@ function PlanPreview({
         : () => "rgba(0, 0, 0, 0.8)";
       const lines = plan.motions
         .filter((m) => m instanceof XYMotion)
-        .map((m) => m.blocks.map((b) => b.p1).concat([m.p2])) // Map each XYMotion to its start/end points
+        .map((m) => (m as XYMotion).points()) // Each XYMotion's block start points plus its final end point
         .filter((m) => m.length);
       return (
         <g transform={`scale(${1 / device.stepsPerMm})`}>
