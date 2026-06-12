@@ -1,4 +1,4 @@
-import { type Block, type Motion, PenMotion, type Plan, XYMotion } from "./planning.js";
+import { type Motion, PenMotion, type Plan, XYMotion } from "./planning.js";
 import { PlotTelemetry } from "./telemetry.js";
 import { type Vec2, vsub } from "./vec.js";
 
@@ -395,18 +395,20 @@ export class EBB {
     }
   }
 
-  public async executeBlockWithLM(block: Block): Promise<void> {
-    const [errX, stepsX] = modf((block.p2.x - block.p1.x) * this.stepMultiplier + this.error.x);
-    const [errY, stepsY] = modf((block.p2.y - block.p1.y) * this.stepMultiplier + this.error.y);
+  public async executeBlockWithLM(
+    p1x: number,
+    p1y: number,
+    p2x: number,
+    p2y: number,
+    vInitial: number,
+    vFinal: number,
+  ): Promise<void> {
+    const [errX, stepsX] = modf((p2x - p1x) * this.stepMultiplier + this.error.x);
+    const [errY, stepsY] = modf((p2y - p1y) * this.stepMultiplier + this.error.y);
     this.error.x = errX;
     this.error.y = errY;
     if (stepsX !== 0 || stepsY !== 0) {
-      await this.moveWithAcceleration(
-        stepsX,
-        stepsY,
-        block.vInitial * this.stepMultiplier,
-        block.vFinal * this.stepMultiplier,
-      );
+      await this.moveWithAcceleration(stepsX, stepsY, vInitial * this.stepMultiplier, vFinal * this.stepMultiplier);
     }
   }
   /**
@@ -418,19 +420,24 @@ export class EBB {
     const telemetry = this.telemetry;
     telemetry?.beginMotion();
     const qmInterval = telemetry?.qmInterval ?? 0;
-    let blockIdx = 0;
+    const n = plan.length;
     try {
-      for (const block of plan.blocks) {
+      for (let i = 0; i < n; i++) {
+        const p1x = plan.p1x(i);
+        const p1y = plan.p1y(i);
+        const p2x = plan.p2x(i);
+        const p2y = plan.p2y(i);
+        const vInitial = plan.vInitial(i);
+        const vFinal = plan.vFinal(i);
         if (telemetry) {
           const t0 = performance.now();
-          await this.executeBlockWithLM(block);
-          telemetry.recordBlock(block.duration * 1000, performance.now() - t0);
-          blockIdx++;
-          if (qmInterval > 0 && blockIdx % qmInterval === 0) {
-            telemetry.recordQM(await this.query("QM"), blockIdx);
+          await this.executeBlockWithLM(p1x, p1y, p2x, p2y, vInitial, vFinal);
+          telemetry.recordBlock(plan.blockDuration(i) * 1000, performance.now() - t0);
+          if (qmInterval > 0 && (i + 1) % qmInterval === 0) {
+            telemetry.recordQM(await this.query("QM"), i + 1);
           }
         } else {
-          await this.executeBlockWithLM(block);
+          await this.executeBlockWithLM(p1x, p1y, p2x, p2y, vInitial, vFinal);
         }
       }
     } finally {
