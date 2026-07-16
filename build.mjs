@@ -19,8 +19,10 @@ const buildOptions = {
   define: {
     IS_WEB: (process.env.IS_WEB === "1").toString(),
     "process.env.DEBUG_SAXI_COMMANDS": JSON.stringify(process.env.DEBUG_SAXI_COMMANDS ?? ""),
-    "process.env.SAXI_TELEMETRY": JSON.stringify(process.env.SAXI_TELEMETRY ?? ""),
-    "process.env.SAXI_TELEMETRY_QM": JSON.stringify(process.env.SAXI_TELEMETRY_QM ?? ""),
+    // REMOVED: telemetry — dropped the SAXI_TELEMETRY and SAXI_TELEMETRY_QM defines
+    //   that let the browser-direct (WebSerial) EBB read those flags at runtime.
+    //   To rebuild, re-add both JSON.stringify(process.env.SAXI_TELEMETRY* ?? "")
+    //   lines here so esbuild inlines them. See the anchor note in ebb.ts.
     "process.env.SAXI_FIFO_DEPTH": JSON.stringify(process.env.SAXI_FIFO_DEPTH ?? ""),
   },
   plugins: [

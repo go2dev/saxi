@@ -1,7 +1,7 @@
 /**
  * Serial worker host.
  *
- * Owns the serial port, the EBB instance, its telemetry, and the reconnect
+ * Owns the serial port, the EBB instance, and the reconnect
  * loop. When loaded as a worker_thread it self-wires to parentPort; the
  * in-process transport (used under vitest) calls createEbbHost directly so the
  * serial-port mock still applies. The EBB class is untouched and stays
@@ -60,8 +60,8 @@ export function createEbbHost(options: EbbHostOptions, postToMain: (msg: WorkerT
         return requireEbb().enableMotors(args[0] as any);
       case "disableMotors":
         return requireEbb().disableMotors();
-      case "setFifoLedIndicator":
-        return requireEbb().setFifoLedIndicator(args[0] as boolean);
+      // REMOVED: telemetry — dropped the "setFifoLedIndicator" case here (it
+      //   forwarded to EBB.setFifoLedIndicator, the machine's FIFO-empty LED).
       case "configureFifoDepth":
         return requireEbb().configureFifoDepth();
       case "waitUntilMotorsIdle":
@@ -73,12 +73,10 @@ export function createEbbHost(options: EbbHostOptions, postToMain: (msg: WorkerT
         hardware = args[0] as Hardware;
         currentEbb?.changeHardware(hardware);
         return undefined;
-      case "resetTelemetry":
-        currentEbb?.telemetry?.reset();
-        return undefined;
-      case "logTelemetrySummary":
-        currentEbb?.telemetry?.logSummary();
-        return undefined;
+      // REMOVED: telemetry — dropped "resetTelemetry" (currentEbb?.telemetry?.reset())
+      //   and "logTelemetrySummary" (currentEbb?.telemetry?.logSummary()) cases.
+      //   These started measurement at plot begin and printed the summary at end,
+      //   across the worker boundary. See the anchor note in ebb.ts.
       default:
         throw new Error(`Unknown EBB method: ${method}`);
     }

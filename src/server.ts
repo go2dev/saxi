@@ -254,8 +254,9 @@ export async function startServer(
 
   const realPlotter: Plotter = {
     async prePlot(initialPenHeight: number): Promise<void> {
-      await ebbProxy.resetTelemetry();
-      await ebbProxy.setFifoLedIndicator(true);
+      // REMOVED: telemetry — was `ebbProxy.resetTelemetry()` (start per-plot timing)
+      //   + `ebbProxy.setFifoLedIndicator(true)` (light the machine's FIFO-empty
+      //   LED) here at plot start. See the anchor note in ebb.ts.
       await ebbProxy.configureFifoDepth();
       await ebbProxy.enableMotors(1); // 16x microstepping, matches defaults from Axidraw
       await ebbProxy.setPenHeight(initialPenHeight, 1000, 1000);
@@ -272,9 +273,12 @@ export async function startServer(
     },
     async postPlot(): Promise<void> {
       await ebbProxy.waitUntilMotorsIdle();
-      await ebbProxy.setFifoLedIndicator(false);
+      // REMOVED: telemetry — was `ebbProxy.setFifoLedIndicator(false)` (turn the
+      //   FIFO-empty LED off) + `ebbProxy.logTelemetrySummary()` (print the
+      //   whole-plot planned-vs-actual summary) here at plot end. This is the
+      //   server path; the CLI equivalent lived in EBB.executePlan. See the
+      //   anchor note in ebb.ts.
       await ebbProxy.disableMotors();
-      await ebbProxy.logTelemetrySummary();
     },
   };
 
