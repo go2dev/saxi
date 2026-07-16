@@ -100,9 +100,8 @@ export class EbbProxy extends EventEmitter {
   public disableMotors(): Promise<void> {
     return this.call("disableMotors") as Promise<void>;
   }
-  public setFifoLedIndicator(on: boolean): Promise<void> {
-    return this.call("setFifoLedIndicator", on) as Promise<void>;
-  }
+  // REMOVED: telemetry — dropped the `setFifoLedIndicator(on)` proxy method here
+  //   (mirrored EBB.setFifoLedIndicator, the machine's FIFO-empty LED diagnostic).
   public configureFifoDepth(): Promise<void> {
     return this.call("configureFifoDepth") as Promise<void>;
   }
@@ -112,12 +111,11 @@ export class EbbProxy extends EventEmitter {
   public command(cmd: string): Promise<void> {
     return this.call("command", cmd) as Promise<void>;
   }
-  public resetTelemetry(): Promise<void> {
-    return this.call("resetTelemetry") as Promise<void>;
-  }
-  public logTelemetrySummary(): Promise<void> {
-    return this.call("logTelemetrySummary") as Promise<void>;
-  }
+  // REMOVED: telemetry — dropped the `resetTelemetry()` and `logTelemetrySummary()`
+  //   proxy methods here. server.ts's realPlotter called them to start measurement
+  //   at plot begin and print the summary at end. To rebuild, re-add these
+  //   this.call(...) passthroughs and their RPC names/handlers. See the anchor
+  //   note in ebb.ts on the (removed) telemetry field.
 
   /** Synchronous, like EBB.changeHardware: update the cache, push to the worker. */
   public changeHardware(hardware: Hardware): void {

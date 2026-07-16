@@ -1,5 +1,4 @@
 import { type Block, type Motion, PenMotion, type Plan, XYMotion } from "./planning.js";
-import { PlotTelemetry } from "./telemetry.js";
 import { type Vec2, vsub } from "./vec.js";
 
 enum MicrostepMode {
@@ -67,7 +66,41 @@ export class EBB {
   // biome-ignore lint/correctness/noUnusedPrivateClassMembers: used in constructor
   private readableClosed: Promise<void>;
   public hardware: Hardware;
-  public telemetry: PlotTelemetry | null;
+
+  // ── REMOVED: plot timing telemetry (was `public telemetry: PlotTelemetry | null`) ──
+  // A diagnostics module (src/telemetry.ts, class PlotTelemetry) used to hang off
+  // the EBB to diagnose stuttery plots. It's stripped from this build; this note
+  // and the sibling "REMOVED: telemetry" markers below are the map to rebuild it.
+  //
+  // WHAT IT MEASURED (and why it matters for performance):
+  //   Every planned motion Block is sent as one serial command, and the board's
+  //   motion FIFO is shallow (1-deep on firmware 2.x). The plot stays smooth only
+  //   if each command's send->OK round-trip finishes faster than the *previous*
+  //   block physically takes to execute; otherwise the steppers run dry between
+  //   commands and you hear/see stutter. Telemetry timed, per block, the planned
+  //   block duration vs the actual send->OK "command cycle", and flagged any
+  //   cycle that overran its block ("stall").
+  //
+  // WHAT THE NUMBERS TELL YOU:
+  //   - Many blocks with actual >> planned  -> the host can't feed the 1-deep
+  //     FIFO fast enough -> stutter. Denser SVGs (shorter blocks) make it worse.
+  //   - Host-side probes (event-loop lag timer + Node GC PerformanceObserver):
+  //     if lag/GC log lines coincide with the slow blocks, the *host* froze
+  //     (main-thread GC/express/ws). If slow blocks appear with no lag/GC, the
+  //     *serial link* itself is slow.
+  //   - Optional QM sampling (SAXI_TELEMETRY_QM=N): asks the machine every N
+  //     blocks whether it's idle / FIFO-empty mid-path -> machine-side proof of
+  //     an underrun (vs. inferring it from host timing).
+  //   - With a DEEP FIFO (the #309 fix), overruns are mostly healthy backpressure,
+  //     not starvation -- judge smoothness by actual-vs-plan and QM-idle, not raw
+  //     stall counts.
+  //
+  // TO REBUILD: restore src/telemetry.ts, re-add this field, gate it on
+  //   `process.env.SAXI_TELEMETRY` in the constructor (below), and re-wire the
+  //   call sites tagged "REMOVED: telemetry" in write(), configureFifoDepth(),
+  //   executeXYMotionWithLM(), executePlan(), setFifoLedIndicator() [also removed],
+  //   plus the RPC passthroughs in ebb-rpc/ebb-worker/ebb-proxy and server.ts's
+  //   realPlotter, and the SAXI_TELEMETRY define in build.mjs.
 
   private microsteppingMode = MicrostepMode.DISABLED;
 
@@ -81,9 +114,10 @@ export class EBB {
     this.port = port;
     this.writer = this.port.writable.getWriter();
     this.commandQueue = [];
-    this.telemetry = process.env.SAXI_TELEMETRY
-      ? new PlotTelemetry(Number(process.env.SAXI_TELEMETRY_QM || 0))
-      : null;
+    // REMOVED: telemetry — was `this.telemetry = process.env.SAXI_TELEMETRY
+    //   ? new PlotTelemetry(Number(process.env.SAXI_TELEMETRY_QM || 0)) : null`.
+    //   SAXI_TELEMETRY=1 enabled it; SAXI_TELEMETRY_QM=N added machine QM sampling.
+    //   See the anchor note on the (removed) telemetry field above.
 
     let buffer = "";
 
@@ -153,12 +187,11 @@ export class EBB {
       console.log(`writing: ${str}`);
     }
     const encoder = new TextEncoder();
-    if (this.telemetry) {
-      const t0 = performance.now();
-      const written = this.writer.write(encoder.encode(str));
-      written.then(() => this.telemetry?.recordWrite(performance.now() - t0)).catch(() => {});
-      return written;
-    }
+    // REMOVED: telemetry — this used to time how long each serial write took to
+    //   be accepted by the OS driver (telemetry.recordWrite(...)). A high write
+    //   p95/max isolates a slow OS/USB serial path from a slow board. To rebuild,
+    //   wrap the write in performance.now() timing and report it. See the anchor
+    //   note on the (removed) telemetry field.
     return this.writer.write(encoder.encode(str));
   }
 
@@ -208,28 +241,17 @@ export class EBB {
     }
   }
 
-  /**
-   * When telemetry is enabled, make the EBB light its red USR LED whenever the
-   * motion FIFO is empty (firmware >= 2.8.1). During a pen-down path the FIFO
-   * should never be empty, so a flickering red LED is the machine itself
-   * reporting buffer underrun, independent of any host-side timing.
-   */
-  public async setFifoLedIndicator(on: boolean): Promise<void> {
-    if (!this.telemetry) return;
-    try {
-      if ((await this.firmwareVersionCompare(2, 8, 1)) >= 0) {
-        await this.command(`CU,3,${on ? 1 : 0}`);
-        if (on) {
-          console.log("[saxi-telemetry] red USR LED on the EBB = FIFO-empty indicator (flicker during a path = underrun)");
-        }
-      } else if (on) {
-        console.log("[saxi-telemetry] firmware < 2.8.1: FIFO LED indicator (CU,3) not available");
-      }
-    } catch (err) {
-      // Diagnostic nicety only; never let it abort a plot.
-      console.log(`[saxi-telemetry] FIFO LED indicator unavailable: ${(err as Error).message}`);
-    }
-  }
+  // ── REMOVED: telemetry — setFifoLedIndicator(on) ──
+  // This was a machine-side underrun diagnostic (only ran when telemetry was on).
+  // It sent `CU,3,1` (firmware >= 2.8.1) to make the EBB light its red USR LED
+  // whenever the motion FIFO is empty. During a pen-down path the FIFO should
+  // never be empty, so a flickering red LED during a stroke is the board itself
+  // reporting buffer underrun — hardware-level proof of stutter, independent of
+  // any host timing. `CU,3,0` turned it off. It was called `true` in
+  // executePlan()/realPlotter.prePlot and `false` in postPlot.
+  // TO REBUILD: restore this method (send CU,3,on) and its two call sites, plus
+  // the RPC passthrough (ebb-rpc/worker/proxy). See the anchor note on the
+  // (removed) telemetry field.
 
   /** The board's maximum motion FIFO depth (QU,2; firmware >= 3.0.0). */
   private async maxFifoDepth(): Promise<number> {
@@ -266,7 +288,9 @@ export class EBB {
       const depth = requested >= 1 ? requested : await this.maxFifoDepth();
       await this.command(`CU,4,${depth}`);
       console.log(`[saxi] EBB motion FIFO depth set to ${depth}`);
-      if (this.telemetry) this.telemetry.fifoDepth = depth;
+      // REMOVED: telemetry — used to publish `depth` to telemetry.fifoDepth so the
+      //   summary could tell healthy backpressure (deep FIFO) from starvation
+      //   (1-deep FIFO) when reading stall counts. To rebuild, set it here.
     } catch (err) {
       console.log(`[saxi] failed to set FIFO depth: ${(err as Error).message}`);
     }
@@ -415,27 +439,20 @@ export class EBB {
    * Note that the LM command is only available starting from EBB firmware version 2.5.3.
    */
   public async executeXYMotionWithLM(plan: XYMotion): Promise<void> {
-    const telemetry = this.telemetry;
-    telemetry?.beginMotion();
-    const qmInterval = telemetry?.qmInterval ?? 0;
-    let blockIdx = 0;
-    try {
-      for (const block of plan.blocks) {
-        if (telemetry) {
-          const t0 = performance.now();
-          await this.executeBlockWithLM(block);
-          telemetry.recordBlock(block.duration * 1000, performance.now() - t0);
-          blockIdx++;
-          if (qmInterval > 0 && blockIdx % qmInterval === 0) {
-            telemetry.recordQM(await this.query("QM"), blockIdx);
-          }
-        } else {
-          await this.executeBlockWithLM(block);
-        }
-      }
-    } finally {
-      // On cancel the loop throws mid-motion; still report what was measured.
-      telemetry?.endMotion();
+    // ── REMOVED: telemetry — this loop was the core measurement point ──
+    // When telemetry was on, each block was timed here: t0 = performance.now()
+    // around `executeBlockWithLM(block)` (the send->OK command cycle), then
+    // `telemetry.recordBlock(block.duration * 1000, cycleMs)` compared the block's
+    // PLANNED duration to the ACTUAL cycle time. That planned-vs-actual delta,
+    // summed across blocks, is THE stutter signal: if cycles routinely overrun
+    // their blocks, the 1-deep FIFO drains and the machine stutters. It also
+    // sampled `QM` every SAXI_TELEMETRY_QM blocks (recordQM) to catch a
+    // machine-side underrun, and endMotion() printed per-motion p50/p95/max even
+    // on cancel (hence the try/finally). TO REBUILD: wrap executeBlockWithLM in
+    // performance.now() timing and feed a PlotTelemetry here. See the anchor note
+    // on the (removed) telemetry field.
+    for (const block of plan.blocks) {
+      await this.executeBlockWithLM(block);
     }
   }
 
@@ -499,8 +516,9 @@ export class EBB {
   }
 
   public async executePlan(plan: Plan, microsteppingMode: RunningMicrostepMode = MicrostepMode.EIGHTH): Promise<void> {
-    this.telemetry?.reset();
-    await this.setFifoLedIndicator(true);
+    // REMOVED: telemetry — was `this.telemetry?.reset()` + `setFifoLedIndicator(true)`
+    //   here to start measurement + the machine's FIFO-empty LED for this (CLI
+    //   `saxi plot`) path. See the anchor note on the (removed) telemetry field.
     await this.configureFifoDepth();
     await this.enableMotors(microsteppingMode);
 
@@ -509,9 +527,9 @@ export class EBB {
     }
 
     await this.waitUntilMotorsIdle();
-    await this.setFifoLedIndicator(false);
+    // REMOVED: telemetry — was `setFifoLedIndicator(false)` + `this.telemetry?.logSummary()`
+    //   here to turn off the LED and print the whole-plot planned-vs-actual summary.
     await this.disableMotors();
-    this.telemetry?.logSummary();
   }
 
   /**

@@ -22,13 +22,16 @@ export type EbbMethod =
   | "supportsSR"
   | "enableMotors"
   | "disableMotors"
-  | "setFifoLedIndicator"
+  // REMOVED: telemetry — dropped "setFifoLedIndicator" | "resetTelemetry" |
+  //   "logTelemetrySummary" from this RPC method union. These bridged the
+  //   server's plot loop to the worker's EBB telemetry (start/stop measurement,
+  //   toggle the machine's FIFO-empty LED, print the summary). To rebuild, re-add
+  //   the three names here and their handlers in ebb-worker.ts + ebb-proxy.ts.
+  //   See the anchor note in ebb.ts on the (removed) telemetry field.
   | "configureFifoDepth"
   | "waitUntilMotorsIdle"
   | "command"
-  | "changeHardware"
-  | "resetTelemetry"
-  | "logTelemetrySummary";
+  | "changeHardware";
 
 export type MainToWorker =
   | { kind: "call"; id: number; method: EbbMethod; args: unknown[] }
